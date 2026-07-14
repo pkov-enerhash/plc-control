@@ -1,0 +1,1273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PLC Control · Architecture Visualization</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root,
+  [data-theme="dark"] {
+    --bg: #0e1116;
+    --bg-elev: #161a22;
+    --bg-elev-2: #1d222c;
+    --line: #2a313e;
+    --line-soft: #1f2530;
+    --text: #d8dee9;
+    --text-dim: #8b95a7;
+    --text-faint: #5a6373;
+    --amber: #f5a524;          /* telemetry / data up */
+    --cyan: #5cc8ff;           /* commands / control down */
+    --amber-soft: rgba(245, 165, 36, 0.14);
+    --cyan-soft: rgba(92, 200, 255, 0.14);
+    --green: #5fd38a;          /* completed / development done */
+    --green-soft: rgba(95, 211, 138, 0.13);
+    --green-glow: rgba(95, 211, 138, 0.45);
+    --accent: #e8d5a3;
+    --grid: rgba(255,255,255,0.025);
+    --node-bg: var(--bg);
+    --node-fill-amber: rgba(245, 165, 36, 0.05);
+    --node-fill-cyan: rgba(92, 200, 255, 0.05);
+    --topic-fill-amber: rgba(245, 165, 36, 0.04);
+    --topic-fill-cyan: rgba(92, 200, 255, 0.04);
+    --selected-glow: rgba(232, 213, 163, 0.35);
+    --tooltip-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(232, 213, 163, 0.06);
+    --particle-glow: drop-shadow(0 0 5px currentColor);
+  }
+  [data-theme="light"] {
+    --bg: #faf7f1;
+    --bg-elev: #f3eee4;
+    --bg-elev-2: #ebe5d6;
+    --line: #cdc5b3;
+    --line-soft: #ddd6c5;
+    --text: #1f2328;
+    --text-dim: #5a5750;
+    --text-faint: #8a8478;
+    --amber: #b87514;
+    --cyan: #0969a8;
+    --amber-soft: rgba(184, 117, 20, 0.10);
+    --cyan-soft: rgba(9, 105, 168, 0.10);
+    --green: #1f8f55;
+    --green-soft: rgba(31, 143, 85, 0.11);
+    --green-glow: rgba(31, 143, 85, 0.30);
+    --accent: #8a6914;
+    --grid: rgba(0,0,0,0.025);
+    --node-bg: #fffdf7;
+    --node-fill-amber: rgba(184, 117, 20, 0.06);
+    --node-fill-cyan: rgba(9, 105, 168, 0.06);
+    --topic-fill-amber: rgba(184, 117, 20, 0.05);
+    --topic-fill-cyan: rgba(9, 105, 168, 0.05);
+    --selected-glow: rgba(138, 105, 20, 0.25);
+    --tooltip-shadow: 0 8px 32px rgba(80,60,20,0.15), 0 0 0 1px rgba(138, 105, 20, 0.08);
+    --particle-glow: drop-shadow(0 1px 2px rgba(0,0,0,0.15));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; }
+  body {
+    min-height: 100vh;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
+    padding: 32px 24px 64px;
+  }
+
+  .frame { max-width: 1280px; margin: 0 auto; }
+
+  /* HEADER */
+  header {
+    border: 1px solid var(--line);
+    background: var(--bg-elev);
+    padding: 22px 28px;
+    margin-bottom: 24px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 28px;
+    align-items: center;
+  }
+  .mark {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+  .mark .num { color: var(--amber); }
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text);
+  }
+  h1 em { font-style: italic; color: var(--amber); font-weight: 500; }
+  .meta {
+    text-align: right;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    line-height: 1.6;
+  }
+  .meta .live { color: var(--amber); }
+  .meta .live::before {
+    content: '●';
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+  }
+  .theme-toggle {
+    display: inline-flex;
+    margin-top: 6px;
+    border: 1px solid var(--line);
+  }
+  .theme-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    padding: 4px 9px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .theme-btn:hover { color: var(--text); }
+  .theme-btn.active {
+    background: var(--bg-elev-2);
+    color: var(--amber);
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* TAB SELECTOR */
+  .selector {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    margin-bottom: 24px;
+    border: 1px solid var(--line);
+    background: var(--bg-elev);
+  }
+  .tab {
+    padding: 18px 22px;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--line);
+    color: var(--text-dim);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    position: relative;
+  }
+  .tab:last-child { border-right: none; }
+  .tab:hover { background: var(--bg-elev-2); color: var(--text); }
+  .tab.active { background: var(--bg-elev-2); color: var(--text); }
+  .tab.active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--amber);
+  }
+  .tab-num {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .tab.active .tab-num { color: var(--amber); }
+  .tab-name {
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 300;
+    margin-bottom: 4px;
+  }
+  .tab-sub {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+  }
+  .tab-status {
+    color: var(--amber);
+    margin-left: 8px;
+    letter-spacing: 0.14em;
+  }
+  .tab-status.target { color: var(--cyan); }
+
+  /* MAIN STAGE */
+  .stage {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 24px;
+  }
+  @media (max-width: 960px) {
+    .stage { grid-template-columns: 1fr; }
+  }
+
+  .diagram-wrap {
+    border: 1px solid var(--line);
+    background: var(--bg-elev);
+    padding: 24px;
+    position: relative;
+    min-height: 640px;
+    overflow: visible;
+  }
+  .diagram-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .legend {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .legend-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+  .legend-dot.up { background: var(--amber); box-shadow: 0 0 8px var(--amber-soft); }
+  .legend-dot.down { background: var(--cyan); box-shadow: 0 0 8px var(--cyan-soft); }
+  .legend-dot.result {
+    background: transparent;
+    border: 1.5px solid var(--cyan);
+    box-shadow: 0 0 6px var(--cyan-soft);
+  }
+
+  svg { width: 100%; height: auto; display: block; }
+
+  /* SVG element styles */
+  .layer-bg {
+    fill: var(--bg-elev-2);
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .layer-bg.outside {
+    fill: transparent;
+    stroke: var(--line-soft);
+    stroke-dasharray: 3 4;
+  }
+  .layer-label {
+    fill: var(--text-faint);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .node {
+    fill: var(--node-bg);
+    stroke: var(--line);
+    stroke-width: 1.2;
+  }
+  .node.highlight {
+    stroke: var(--amber);
+    fill: var(--node-fill-amber);
+  }
+  .node.cyan {
+    stroke: var(--cyan);
+    fill: var(--node-fill-cyan);
+  }
+  .node.topic {
+    fill: var(--topic-fill-amber);
+    stroke: var(--amber);
+    stroke-width: 1;
+    stroke-dasharray: 0;
+  }
+  .node.topic.cyan {
+    fill: var(--topic-fill-cyan);
+    stroke: var(--cyan);
+  }
+  .layer-bg, .node {
+    cursor: pointer;
+    transition: stroke 0.15s, fill 0.15s, filter 0.2s;
+  }
+  .layer-bg:hover { stroke: var(--text-faint); }
+  .node:hover {
+    stroke: var(--accent);
+    filter: brightness(1.15);
+  }
+  .layer-bg.selected, .node.selected {
+    stroke: var(--accent) !important;
+    stroke-width: 1.6;
+    filter: drop-shadow(0 0 6px var(--selected-glow));
+  }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute;
+    width: 280px;
+    background: var(--bg-elev);
+    border: 1px solid var(--accent);
+    padding: 16px 18px;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.18s, transform 0.18s;
+    box-shadow: var(--tooltip-shadow);
+  }
+  .tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  .tooltip-kind {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .tooltip-close {
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+  .tooltip-close:hover { color: var(--text); }
+  .tooltip-title {
+    font-family: 'Fraunces', serif;
+    font-size: 17px;
+    font-weight: 400;
+    line-height: 1.25;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .tooltip-body {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--text-dim);
+  }
+  .tooltip-body strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .tooltip-meta {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+  }
+  .node-title {
+    fill: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-anchor: middle;
+  }
+  .node-sub {
+    fill: var(--text-faint);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    text-anchor: middle;
+    letter-spacing: 0.04em;
+  }
+  .conn {
+    stroke: var(--line);
+    stroke-width: 1;
+    fill: none;
+  }
+  .conn.dashed {
+    stroke-dasharray: 4 3;
+  }
+
+  /* Animated flow particles */
+  .flow-up {
+    fill: var(--amber);
+    color: var(--amber);
+    filter: var(--particle-glow);
+  }
+  .flow-down {
+    fill: var(--cyan);
+    color: var(--cyan);
+    filter: var(--particle-glow);
+  }
+  .flow-result {
+    fill: none;
+    stroke: var(--cyan);
+    stroke-width: 1.5;
+    color: var(--cyan);
+    filter: var(--particle-glow);
+  }
+
+  /* SIDE PANEL */
+  .panel {
+    border: 1px solid var(--line);
+    background: var(--bg-elev);
+    padding: 24px;
+    height: fit-content;
+  }
+  .panel-section { margin-bottom: 24px; }
+  .panel-section:last-child { margin-bottom: 0; }
+  .panel-status {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 12px;
+    margin-bottom: 22px;
+    background: var(--amber-soft);
+    border-left: 2px solid var(--amber);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  .panel-status.target {
+    background: var(--cyan-soft);
+    border-left-color: var(--cyan);
+    color: var(--cyan);
+  }
+  .panel-status .ps-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+  .panel-status .ps-label { font-weight: 600; }
+  .panel-label {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .panel-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .panel-title em { font-style: italic; color: var(--amber); font-weight: 500; }
+  .panel-desc {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+  .stat {
+    background: var(--bg-elev);
+    padding: 12px;
+  }
+  .stat-label {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .stat-value {
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--amber);
+  }
+  .stat-value.cyan { color: var(--cyan); }
+  .deltas {
+    list-style: none;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+  .deltas li {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 6px 0;
+    padding-left: 18px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .deltas li::before {
+    content: '+';
+    position: absolute;
+    left: 0;
+    color: var(--amber);
+    font-weight: 700;
+  }
+  .deltas li.same::before {
+    content: '=';
+    color: var(--text-faint);
+  }
+  .deltas li.same { color: var(--text-faint); }
+  .deltas li.miss::before {
+    content: '−';
+    color: var(--cyan);
+  }
+  .deltas li.miss { color: var(--text-faint); }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .ctrl-btn {
+    flex: 1;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .ctrl-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .ctrl-btn.cyan:hover { border-color: var(--cyan); color: var(--cyan); }
+
+  /* Footer */
+  footer {
+    margin-top: 24px;
+    padding: 18px 24px;
+    border: 1px solid var(--line);
+    background: var(--bg-elev);
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  footer .principle { color: var(--text-dim); text-transform: none; letter-spacing: 0.04em; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <header>
+    <div class="mark">
+      DOC <span class="num">/04</span><br>
+      VISUAL
+    </div>
+    <h1>PLC Control</h1>
+    <div class="meta">
+      <div>EMS · S7-1200 · GCP</div>
+      <div class="live">SCHEMATIC LIVE</div>
+      <div class="theme-toggle" role="group" aria-label="Theme">
+        <button class="theme-btn active" data-theme-set="dark" aria-label="Dark theme">DARK</button>
+        <button class="theme-btn" data-theme-set="light" aria-label="Light theme">LIGHT</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="stage">
+
+    <div class="diagram-wrap">
+      <div class="diagram-meta">
+        <div>SCHEMATIC · PLC CONTROL · <span style="color:var(--accent)">CLICK ANY LAYER OR COMPONENT</span></div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot up"></div>TELEMETRY ↑</div>
+          <div class="legend-item"><div class="legend-dot down"></div>COMMAND · HEARTBEAT ↓</div>
+          <div class="legend-item"><div class="legend-dot result"></div>ACK / RESULT</div>
+        </div>
+      </div>
+
+      <svg viewBox="0 0 800 720" xmlns="http://www.w3.org/2000/svg" id="diagram">
+        <!-- Layer backgrounds (constant across tabs) -->
+        <g id="layers">
+          <!-- L1: UI -->
+          <rect class="layer-bg" x="40" y="20" width="720" height="80" rx="2" data-layer="L1"/>
+          <text class="layer-label" x="52" y="40" pointer-events="none">UI · DASHBOARD</text>
+
+          <!-- L2: API -->
+          <rect class="layer-bg" x="40" y="120" width="720" height="80" rx="2" data-layer="L2"/>
+          <text class="layer-label" x="52" y="140" pointer-events="none">API</text>
+
+          <!-- L4: Live state | L5: History (side by side) -->
+          <rect class="layer-bg" x="40" y="220" width="350" height="100" rx="2" data-layer="L4"/>
+          <text class="layer-label" x="52" y="240" pointer-events="none">LIVE STATE</text>
+
+          <rect class="layer-bg" x="410" y="220" width="350" height="100" rx="2" data-layer="L5"/>
+          <text class="layer-label" x="422" y="240" pointer-events="none">HISTORY · AUDIT</text>
+
+          <!-- Pub/Sub bus -->
+          <rect class="layer-bg" x="40" y="340" width="720" height="50" rx="2" data-layer="BUS"/>
+          <text class="layer-label" x="52" y="360" pointer-events="none">EVENT BUS</text>
+          <text class="layer-label" x="52" y="375" style="opacity:0.6" pointer-events="none">PUB/SUB</text>
+
+          <!-- EDGE: the fused bridge (L3 + L6 in one process) -->
+          <rect class="layer-bg" x="40" y="410" width="720" height="145" rx="2" data-layer="EDGE"/>
+          <text class="layer-label" x="52" y="430" pointer-events="none">EDGE · PLC BRIDGE @ WIREGUARD VM</text>
+
+          <!-- Device surface (outside system boundary) -->
+          <rect class="layer-bg outside" x="40" y="575" width="720" height="115" rx="2" data-layer="DEVICE"/>
+          <text class="layer-label" x="52" y="595" pointer-events="none">DEVICE SURFACE · S7-1200 @ SITE · SHARED-MEMORY CONTRACT</text>
+        </g>
+
+        <!-- Dynamic content lives here -->
+        <g id="dynamic"></g>
+
+        <!-- Animated flow particles -->
+        <g id="particles"></g>
+      </svg>
+
+      <div class="tooltip" id="tooltip" role="dialog" aria-hidden="true"></div>
+    </div>
+
+    <aside class="panel" id="panel">
+      <!-- panel content injected by JS -->
+    </aside>
+
+  </div>
+
+  <footer>
+    <div>ENERHASH · EMS · PLC-CONTROL MODULE</div>
+    <div class="principle">Each layer · its own domain language · S7 lives in the <em style="color:var(--amber)">edge adapter</em> only</div>
+    <div>VIS /04</div>
+  </footer>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+// Descriptions for tooltips
+// ─────────────────────────────────────────────────────────────────
+
+const LAYER_DESCRIPTIONS = {
+  L1: {
+    title: "UI Layer",
+    body: "The existing Next.js dashboard, extended with a <strong>features/plc-control</strong> module: live gauges, historical charts, a command composer. Speaks only domain language — power, temperatures, relays, commands. Never knows S7 or byte offsets exist.",
+    meta: "Empty in the PoC"
+  },
+  L2: {
+    title: "API Layer",
+    body: "A <strong>plc-control router inside the ems-api monolith</strong>. Reads live state and history from storage; accepts commands asynchronously: the POST returns 202 immediately, the outcome arrives via the next status poll. The audit row recording <em>who</em> issued <em>what</em> is committed before the command is even published.",
+    meta: "Empty in the PoC"
+  },
+  L4: {
+    title: "Live State Store",
+    body: "Answers one question, fast: <strong>what is the PLC doing right now?</strong> One Firestore document per PLC, holding only the latest reading — older data is overwritten. The dashboard reads from here instead of touching the device, so UI responsiveness never depends on the tunnel or the PLC.",
+    meta: "Empty in the PoC"
+  },
+  L5: {
+    title: "Historical Store + Audit",
+    body: "Postgres, two concerns: <strong>plc_telemetry</strong> for charts and troubleshooting, <strong>plc_command_audit</strong> for who-did-what. History may persist at a coarser cadence than the 500ms live poll — 1–5s is plenty for charts; 500ms would be ~170k rows/day of mostly noise.",
+    meta: "Empty in the PoC"
+  },
+  BUS: {
+    title: "Event Bus · Pub/Sub",
+    body: "The decoupling seam. The bridge publishes telemetry and command-outcome events; consumers subscribe independently — adding one never touches the others. <strong>This is also the strategic hook</strong>: a future automation rule ('PLC reports over-power → curtail miners') is just one more subscriber issuing commands through the existing miner-control API.",
+    meta: "Cross-cutting · GCP Pub/Sub"
+  },
+  EDGE: {
+    title: "Edge · PLC Bridge",
+    body: "One on-prem process that handles <strong>both directions</strong>: reading telemetry out and dispatching commands in. Deliberately fused — the device sits behind the tunnel, there's one of it, and S7 wants a single long-lived connection shared by heartbeat, ACK reads, and telemetry. Internally still two cleanly separated units behind ports, so each is testable without a real PLC. Runs as systemd on the WireGuard VM.",
+    meta: "Collection + dispatch · systemd @ edge"
+  },
+  DEVICE: {
+    title: "Device Surface · S7-1200",
+    body: "Outside the platform boundary. There is no API here — communication is <strong>reading and writing shared memory blocks</strong> (S7 protocol, port 102). The byte layouts of DB1/DB2/DB3 are a contract with the automation engineer's TIA Portal program. Change one side without the other and you get garbage numbers, not errors.",
+    meta: "External · on-prem · snap7"
+  }
+};
+
+// Node descriptions — keyed by [archId][nodeKey]. Use 'default' for shared descriptions.
+const NODE_DESCRIPTIONS = {
+  ui: {
+    2: {
+      title: "Next.js · features/plc-control",
+      body: "New feature module in the existing dashboard. Live gauges for power/voltage/temps, historical charts, a command composer with status badges. <strong>Refreshes by polling the API every few seconds</strong> — simple and predictable; push updates (SSE) remain a later additive upgrade.",
+      meta: "Target · polling 5–10s"
+    }
+  },
+  api: {
+    2: {
+      title: "FastAPI · plc-control router",
+      body: "Lives in the ems-api monolith — no new deployment needed. A command POST returns 202 immediately with a command ID; the audit row is committed before publishing; every operator (human or automated) is recorded. <strong>Pre-flight state checks</strong> reject commands when the PLC reports LOCAL mode — no point queueing what the device will refuse.",
+      meta: "Target · router in the monolith"
+    }
+  },
+  live: {
+    2: {
+      title: "Firestore · PLC live state",
+      body: "One document per PLC with the full latest sample: electrical readings, temperatures, plc_mode, watchdog_ok, error_code, data quality. Writes are <strong>last-write-wins by observation timestamp</strong>, so out-of-order deliveries can never clobber newer data with older. The dashboard's 'is remote control even possible right now?' indicator reads from here.",
+      meta: "Target · GCP Firestore"
+    }
+  },
+  hist: {
+    2: {
+      title: "Postgres · telemetry + audit",
+      body: "Two concerns, one instance: <strong>plc_telemetry</strong> (batched idempotent inserts, ON CONFLICT DO NOTHING) and <strong>plc_command_audit</strong> (the full lifecycle: accepted → dispatching → acked/failed/timed-out, with the DB3 ack result mapped to a domain outcome). The audit table is the single biggest thing the PoC lacks.",
+      meta: "Target · Cloud SQL Postgres"
+    }
+  },
+  topicT: {
+    default: {
+      title: "plc-telemetry topic",
+      body: "The bridge publishes each decoded sample here. In the target, <strong>command-outcome events ride the bus too</strong> (own topic or same one — a naming decision, not an architectural one). The fan-out point: live sink, history sink, and any future automation consumer subscribe independently.",
+      meta: "GCP Pub/Sub · topic"
+    }
+  },
+  topicC: {
+    default: {
+      title: "plc-commands topic",
+      body: "Commands queue here for the bridge's subscriber. The publisher is the API router, which has already written the ACCEPTED audit row before the message is sent — so every command on this topic is traceable to an operator.",
+      meta: "GCP Pub/Sub · topic"
+    }
+  },
+  reader: {
+    2: {
+      title: "Telemetry reader",
+      body: "One half of the bridge. A polling loop depending on a <strong>PlcStateReader port</strong> — it knows nothing about snap7 or byte offsets. Each cycle: read DB1 (and DB3) through the shared adapter, decode via a pure translator, stamp quality flags and a correlation ID, publish. Fully testable on a laptop against a fake PLC.",
+      meta: "Target · 500ms cycle"
+    }
+  },
+  dispatcher: {
+    2: {
+      title: "Command dispatcher",
+      body: "The other half. Subscribes to plc-commands and runs each command's lifecycle: idempotency check, validate (reject if plc_mode=LOCAL), write DB2 with a fresh sequence number, <strong>await the matching ack_seq from DB3</strong>, publish the outcome event. Also owns the 1s heartbeat write that feeds the PLC's watchdog.",
+      meta: "Target · lifecycle + heartbeat"
+    }
+  },
+  s7: {
+    2: {
+      title: "S7 adapter · snap7",
+      body: "<strong>The only code in the entire system that knows S7 exists</strong> — DB numbers, byte offsets, struct packing, reconnect backoff. One long-lived connection shared by the reader and the dispatcher. Swap the PLC vendor, change this adapter, touch nothing above.",
+      meta: "Target · the vendor seam"
+    }
+  },
+  db1: {
+    default: {
+      title: "DB1 · Telemetry block",
+      body: "76 bytes the PLC program continuously overwrites: three-phase voltages and currents, active/reactive/apparent power, frequency, three temperatures, status, error code, <strong>and its own heartbeat counter</strong>. The bridge polls it every 500ms and decodes by byte offset. PLC writes, bridge reads.",
+      meta: "S7 data block · PLC → bridge"
+    }
+  },
+  db2: {
+    default: {
+      title: "DB2 · Command block",
+      body: "8 bytes the bridge writes: command type, parameter, <strong>sequence number</strong>. The PLC's scan loop notices the sequence changed and acts — or refuses. The bridge's 1s HEARTBEAT write lands here too; if it stops, the PLC's watchdog expires and it falls back to safe local control.",
+      meta: "S7 data block · bridge → PLC"
+    }
+  },
+  db3: {
+    default: {
+      title: "DB3 · ACK block",
+      body: "12 bytes the PLC writes back after processing a command: <strong>which sequence number, and the verdict</strong> (OK, REJECTED, SAFETY_BLOCK…), plus plc_mode and watchdog_ok. This is the command's real completion signal — an S7 write only confirms bytes landed, not that anything was accepted.",
+      meta: "S7 data block · PLC → bridge"
+    }
+  }
+};
+
+function getNodeDescription(archId, nodeKey) {
+  const entry = NODE_DESCRIPTIONS[nodeKey];
+  if (!entry) return null;
+  return entry[archId] || entry.default || null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Architecture data — what changes per arch, kept declarative.
+// ─────────────────────────────────────────────────────────────────
+
+const ARCHITECTURES = {
+  2: {
+    title: "Target <em>architecture</em>",
+    statusLabel: "Proposed target",
+    statusClass: "target",
+    desc: "Live and historical PLC telemetry on the dashboard, commands with a full audit trail. Built from the same proven patterns as miner-control, sized for one PLC — not 6,000 devices.",
+    stats: [
+      { label: "PLCs", value: "1 → N" },
+      { label: "Live / history", value: "500ms · 1–5s" },
+      { label: "Dashboard", value: "Polling", cyan: true },
+      { label: "New services", value: "2" },
+    ],
+    deltas: [
+      { same: true, text: "Same layered shape as miner-control · proven in production" },
+      { same: true, text: "Shared package core/ reused · correlation, subscriber, envelopes" },
+      { text: "plc/ bounded context · domain types, ports, no S7 inside" },
+      { text: "Bridge hardened · two hexagons, one S7 connection, fake_plc tests" },
+      { text: "Command audit · accepted → dispatching → acked, LOCAL-mode rejects" },
+      { text: "One sink service · Firestore live + Postgres history/audit" },
+      { text: "plc-control router in ems-api · 202 fire-and-poll" },
+      { text: "features/plc-control dashboard module" },
+    ],
+    nodes: {
+      ui:         { x: 80,  y: 50,  w: 220, h: 38, label: "Next.js dashboard", sub: "features/plc-control · polling" },
+      api:        { x: 80,  y: 150, w: 220, h: 38, label: "FastAPI · plc-control", sub: "router in ems-api monolith" },
+      live:       { x: 110, y: 260, w: 210, h: 44, label: "Firestore", sub: "PLC live state · doc per PLC" },
+      hist:       { x: 480, y: 260, w: 210, h: 44, label: "Postgres", sub: "plc_telemetry + command_audit" },
+      topicT:     { x: 150, y: 348, w: 170, h: 34, label: "plc-telemetry topic", sub: "readings + outcomes", topic: true },
+      topicC:     { x: 500, y: 348, w: 170, h: 34, label: "plc-commands topic", sub: "queue", topic: true, cyan: true },
+      reader:     { x: 80,  y: 442, w: 190, h: 44, label: "Telemetry reader", sub: "DB1 poll · 500ms · quality", highlight: true },
+      dispatcher: { x: 530, y: 442, w: 190, h: 44, label: "Command dispatcher", sub: "lifecycle · heartbeat · ack", cyan: true },
+      s7:         { x: 270, y: 502, w: 260, h: 38, label: "S7 adapter · snap7", sub: "one shared connection · only S7-aware code", highlight: true },
+      db1:        { x: 100, y: 615, w: 170, h: 50, label: "DB1 · telemetry", sub: "76 B · PLC writes" },
+      db2:        { x: 315, y: 615, w: 170, h: 50, label: "DB2 · commands", sub: "8 B · bridge writes", cyan: true },
+      db3:        { x: 530, y: 615, w: 170, h: 50, label: "DB3 · ack", sub: "12 B · PLC writes" },
+    },
+    connections: [
+      { from: "ui", to: "api", type: "down" },
+      { from: "ui", to: "api", type: "up", offset: 30 },
+      { from: "api", to: "live", type: "up" },
+      { from: "api", to: "hist", type: "up" },
+      { from: "api", to: "topicC", type: "down" },
+      { from: "topicC", to: "dispatcher", type: "down" },
+      { from: "topicT", to: "live", type: "up" },
+      { from: "topicT", to: "hist", type: "up" },
+      { from: "reader", to: "topicT", type: "up" },
+      { from: "dispatcher", to: "topicT", type: "up", offset: -30 },
+      { from: "s7", to: "reader", type: "up", dashed: true },
+      { from: "s7", to: "dispatcher", type: "up", dashed: true },
+      { from: "db1", to: "s7", type: "up", dashed: true },
+      { from: "s7", to: "db2", type: "down", dashed: true },
+      { from: "db3", to: "s7", type: "up", dashed: true },
+    ],
+    flowsUp: [
+      "db1->s7->reader->topicT->live",
+      "db1->s7->reader->topicT->hist",
+      "live->api->ui",
+    ],
+    flowsDown: ["dispatcher->s7->db2"],
+    commandTargets: ["db2"],
+    buildCommandFlow: () => "ui->api->topicC->dispatcher->s7->db2",
+    buildResultFlows: () => ({
+      // PLC answers in DB3 → dispatcher matches ack_seq → outcome event → sinks
+      fanOut: ["db3->s7->dispatcher->topicT->hist", "db3->s7->dispatcher->topicT->live"],
+      toUi: "live->api->ui",
+    }),
+    tryLabel: "▾  Send command",
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Rendering
+// ─────────────────────────────────────────────────────────────────
+
+const dyn = document.getElementById("dynamic");
+const particles = document.getElementById("particles");
+const panel = document.getElementById("panel");
+const SVG = "http://www.w3.org/2000/svg";
+
+function el(tag, attrs = {}, text) {
+  const e = document.createElementNS(SVG, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function nodeAnchor(node, side) {
+  if (side === "top") return { x: node.x + node.w / 2, y: node.y };
+  if (side === "bottom") return { x: node.x + node.w / 2, y: node.y + node.h };
+  return { x: node.x + node.w / 2, y: node.y + node.h / 2 };
+}
+
+function buildPath(from, to, opts = {}) {
+  let p0, p1;
+  if (from.y > to.y) {
+    p0 = nodeAnchor(from, "top");
+    p1 = nodeAnchor(to, "bottom");
+  } else {
+    p0 = nodeAnchor(from, "bottom");
+    p1 = nodeAnchor(to, "top");
+  }
+  const offsetX = opts.offset ? opts.offset : 0;
+  const midY = (p0.y + p1.y) / 2;
+  return `M ${p0.x + offsetX} ${p0.y} C ${p0.x + offsetX} ${midY}, ${p1.x + offsetX} ${midY}, ${p1.x + offsetX} ${p1.y}`;
+}
+
+function render(archId) {
+  const arch = ARCHITECTURES[archId];
+  dyn.innerHTML = "";
+  particles.innerHTML = "";
+
+  // Connections first (under nodes)
+  for (const c of arch.connections) {
+    const from = arch.nodes[c.from];
+    const to = arch.nodes[c.to];
+    if (!from || !to) continue;
+    const pathStr = buildPath(from, to, { offset: c.offset || 0 });
+    const path = el("path", {
+      d: pathStr,
+      class: c.dashed ? "conn dashed" : "conn",
+    });
+    dyn.appendChild(path);
+  }
+
+  // Nodes
+  for (const key in arch.nodes) {
+    const n = arch.nodes[key];
+    let cls = "node";
+    if (n.topic) cls += " topic";
+    if (n.highlight) cls += " highlight";
+    if (n.cyan) cls += " cyan";
+    const rect = el("rect", {
+      x: n.x, y: n.y, width: n.w, height: n.h,
+      rx: 2, class: cls,
+      "data-node-key": key,
+    });
+    rect.style.transition = "all 0.4s ease";
+    rect.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showNodeTooltip(key, rect);
+    });
+    dyn.appendChild(rect);
+
+    const t1 = el("text", {
+      x: n.x + n.w / 2,
+      y: n.y + n.h / 2 - 3,
+      class: "node-title",
+      "pointer-events": "none",
+    }, n.label);
+    dyn.appendChild(t1);
+    if (n.sub) {
+      const t2 = el("text", {
+        x: n.x + n.w / 2,
+        y: n.y + n.h / 2 + 11,
+        class: "node-sub",
+        "pointer-events": "none",
+      }, n.sub);
+      dyn.appendChild(t2);
+    }
+  }
+
+  startTelemetryFlow(arch);
+  renderPanel(arch);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Tooltip system
+// ─────────────────────────────────────────────────────────────────
+
+const tooltip = document.getElementById("tooltip");
+const diagramWrap = document.querySelector(".diagram-wrap");
+const svg = document.getElementById("diagram");
+
+function clearSelection() {
+  document.querySelectorAll(".selected").forEach(el => el.classList.remove("selected"));
+}
+
+function hideTooltip() {
+  tooltip.classList.remove("visible");
+  tooltip.setAttribute("aria-hidden", "true");
+  clearSelection();
+}
+
+function showTooltip(content, anchorRect) {
+  const wrapRect = diagramWrap.getBoundingClientRect();
+  const elRect = anchorRect.getBoundingClientRect();
+
+  const tooltipWidth = 280;
+  const gap = 12;
+  let left = elRect.right - wrapRect.left + gap;
+  let top = elRect.top - wrapRect.top;
+
+  if (left + tooltipWidth > wrapRect.width - 8) {
+    left = elRect.left - wrapRect.left - tooltipWidth - gap;
+  }
+  if (left < 8) {
+    left = Math.max(8, Math.min(wrapRect.width - tooltipWidth - 8, elRect.left - wrapRect.left));
+    top = elRect.bottom - wrapRect.top + gap;
+  }
+
+  tooltip.innerHTML = content;
+  tooltip.style.left = left + "px";
+  tooltip.style.top = top + "px";
+  tooltip.classList.add("visible");
+  tooltip.setAttribute("aria-hidden", "false");
+
+  const tipHeight = tooltip.offsetHeight;
+  if (top + tipHeight > wrapRect.height - 8) {
+    top = Math.max(8, wrapRect.height - tipHeight - 8);
+    tooltip.style.top = top + "px";
+  }
+}
+
+function tooltipMarkup(kind, title, body, meta) {
+  return `
+    <div class="tooltip-kind">
+      <span>${kind}</span>
+      <button class="tooltip-close" aria-label="Close">×</button>
+    </div>
+    <div class="tooltip-title">${title}</div>
+    <div class="tooltip-body">${body}</div>
+    ${meta ? `<div class="tooltip-meta">${meta}</div>` : ""}
+  `;
+}
+
+function showLayerTooltip(layerKey, anchorEl) {
+  const desc = LAYER_DESCRIPTIONS[layerKey];
+  if (!desc) return;
+  clearSelection();
+  anchorEl.classList.add("selected");
+  showTooltip(tooltipMarkup("LAYER", desc.title, desc.body, desc.meta), anchorEl);
+}
+
+function showNodeTooltip(nodeKey, anchorEl) {
+  const desc = getNodeDescription(currentArch, nodeKey);
+  if (!desc) return;
+  clearSelection();
+  anchorEl.classList.add("selected");
+  showTooltip(tooltipMarkup("COMPONENT", desc.title, desc.body, desc.meta), anchorEl);
+}
+
+svg.addEventListener("click", (e) => {
+  const target = e.target;
+  if (target.classList && target.classList.contains("layer-bg")) {
+    const layerKey = target.getAttribute("data-layer");
+    if (layerKey) {
+      e.stopPropagation();
+      showLayerTooltip(layerKey, target);
+    }
+  }
+});
+
+tooltip.addEventListener("click", (e) => {
+  if (e.target.classList.contains("tooltip-close")) {
+    hideTooltip();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  if (tooltip.contains(e.target)) return;
+  if (!e.target.closest(".node, .layer-bg")) {
+    hideTooltip();
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideTooltip();
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Animated flow particles
+// ─────────────────────────────────────────────────────────────────
+
+let activeAnimations = [];
+
+function clearAnimations() {
+  activeAnimations.forEach(a => clearTimeout(a));
+  activeAnimations = [];
+  particles.innerHTML = "";
+}
+
+function startTelemetryFlow(arch) {
+  clearAnimations();
+
+  // Recurring telemetry pulses (amber, upward)
+  (arch.flowsUp || []).forEach((flowKey, idx) => {
+    const segments = parseFlow(flowKey, arch);
+    if (!segments) return;
+    const stagger = idx * 700;
+    const loop = () => {
+      animateAlongSegments(segments, "up");
+      const id = setTimeout(loop, 2800);
+      activeAnimations.push(id);
+    };
+    const startId = setTimeout(loop, stagger);
+    activeAnimations.push(startId);
+  });
+
+  // Recurring heartbeat pulses (cyan, downward)
+  (arch.flowsDown || []).forEach((flowKey, idx) => {
+    const segments = parseFlow(flowKey, arch);
+    if (!segments) return;
+    const stagger = 1200 + idx * 700;
+    const loop = () => {
+      animateAlongSegments(segments, "down", { radius: 2.8, segDuration: 650 });
+      const id = setTimeout(loop, 3400);
+      activeAnimations.push(id);
+    };
+    const startId = setTimeout(loop, stagger);
+    activeAnimations.push(startId);
+  });
+}
+
+function parseFlow(flowKey, arch) {
+  const names = flowKey.split("->");
+  const nodes = names.map(n => arch.nodes[n]).filter(Boolean);
+  if (nodes.length < 2) return null;
+  return nodes;
+}
+
+function animateAlongSegments(nodes, direction, opts = {}) {
+  const segDuration = opts.segDuration ?? 800;
+  const radius = opts.radius ?? 3.5;
+  const totalDuration = (nodes.length - 1) * segDuration;
+  const styleClass = direction === "up" ? "flow-up"
+                   : direction === "result" ? "flow-result"
+                   : "flow-down";
+  const particle = el("circle", {
+    cx: 0, cy: 0, r: radius,
+    class: styleClass,
+  });
+  particles.appendChild(particle);
+
+  const startTime = performance.now();
+  function tick(now) {
+    const elapsed = Math.max(0, now - startTime);
+    const segIdx = Math.max(0, Math.min(Math.floor(elapsed / segDuration), nodes.length - 2));
+    const segProgress = (elapsed - segIdx * segDuration) / segDuration;
+    const t = Math.max(0, Math.min(segProgress, 1));
+    const a = nodes[segIdx];
+    const b = nodes[segIdx + 1];
+    let p0, p1;
+    if (a.y > b.y) {
+      p0 = nodeAnchor(a, "top");
+      p1 = nodeAnchor(b, "bottom");
+    } else {
+      p0 = nodeAnchor(a, "bottom");
+      p1 = nodeAnchor(b, "top");
+    }
+    const midY = (p0.y + p1.y) / 2;
+    const c1 = { x: p0.x, y: midY };
+    const c2 = { x: p1.x, y: midY };
+    const x = bezier(t, p0.x, c1.x, c2.x, p1.x);
+    const y = bezier(t, p0.y, c1.y, c2.y, p1.y);
+    particle.setAttribute("cx", x);
+    particle.setAttribute("cy", y);
+
+    if (elapsed >= totalDuration) {
+      particle.remove();
+      if (opts.onComplete) opts.onComplete();
+      return;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function bezier(t, p0, p1, p2, p3) {
+  const u = 1 - t;
+  return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3;
+}
+
+function fireCommand() {
+  const arch = ARCHITECTURES[currentArch];
+  if (!arch.commandTargets || !arch.buildCommandFlow) return;
+  const target = arch.commandTargets[Math.floor(Math.random() * arch.commandTargets.length)];
+  const flowKey = arch.buildCommandFlow(target);
+  const seg = parseFlow(flowKey, arch);
+  if (!seg) return;
+
+  // Phase 1: command travels down to DB2
+  animateAlongSegments(seg, "down", {
+    onComplete: () => {
+      if (!arch.buildResultFlows) return;
+      const result = arch.buildResultFlows();
+
+      // Phase 2: PLC answers in DB3 → ack propagates back out
+      const fanOutDuration = 600;
+      let liveStateReached = false;
+
+      result.fanOut.forEach((flowKey) => {
+        const path = parseFlow(flowKey, arch);
+        if (!path) return;
+        const reachesLive = flowKey.endsWith("->live");
+        animateAlongSegments(path, "result", {
+          segDuration: fanOutDuration,
+          radius: 4,
+          onComplete: () => {
+            if (reachesLive && !liveStateReached && result.toUi) {
+              liveStateReached = true;
+              const toUiPath = parseFlow(result.toUi, arch);
+              if (toUiPath) {
+                animateAlongSegments(toUiPath, "result", {
+                  segDuration: 600,
+                  radius: 4,
+                });
+              }
+            }
+          },
+        });
+      });
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Side panel
+// ─────────────────────────────────────────────────────────────────
+
+function renderPanel(arch) {
+  panel.innerHTML = `
+    <div class="panel-status ${arch.statusClass}">
+      <span class="ps-dot"></span>
+      <span class="ps-label">${arch.statusLabel}</span>
+    </div>
+    <div class="panel-section">
+      <div class="panel-label">Architecture</div>
+      <div class="panel-title">${arch.title}</div>
+      <div class="panel-desc">${arch.desc}</div>
+    </div>
+    <div class="panel-section">
+      <div class="panel-label">At a glance</div>
+      <div class="stat-grid">
+        ${arch.stats.map(s => `
+          <div class="stat">
+            <div class="stat-label">${s.label}</div>
+            <div class="stat-value ${s.cyan ? 'cyan' : ''}">${s.value}</div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="panel-section">
+      <div class="panel-label">What changes vs the PoC</div>
+      <ul class="deltas">
+        ${arch.deltas.map(d => `<li class="${d.same ? 'same' : d.miss ? 'miss' : ''}">${d.text}</li>`).join("")}
+      </ul>
+    </div>
+    <div class="panel-section">
+      <div class="panel-label">Try it</div>
+      <div class="controls">
+        <button class="ctrl-btn cyan" id="cmdBtn">${arch.tryLabel}</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("cmdBtn").addEventListener("click", fireCommand);
+}
+
+const currentArch = 2;
+
+// ─────────────────────────────────────────────────────────────────
+// Theme toggle
+// ─────────────────────────────────────────────────────────────────
+
+document.querySelectorAll(".theme-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const theme = btn.dataset.themeSet;
+    document.documentElement.setAttribute("data-theme", theme);
+    document.querySelectorAll(".theme-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+  });
+});
+
+// Initial render
+render(2);
+</script>
+</body>
+</html>
