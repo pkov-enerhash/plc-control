@@ -626,7 +626,7 @@
 
           <!-- Device surface (outside system boundary) -->
           <rect class="layer-bg outside" x="40" y="575" width="720" height="115" rx="2" data-layer="DEVICE"/>
-          <text class="layer-label" x="52" y="595" pointer-events="none">DEVICE SURFACE · S7-1200 @ SITE · SHARED-MEMORY CONTRACT</text>
+          <text class="layer-label" x="52" y="595" pointer-events="none">DEVICE SURFACE · S7 PLCS @ SITES · SHARED-MEMORY CONTRACT</text>
         </g>
 
         <!-- Dynamic content lives here -->
@@ -686,13 +686,13 @@ const LAYER_DESCRIPTIONS = {
   },
   EDGE: {
     title: "Edge · PLC Bridge",
-    body: "One on-prem process that handles <strong>both directions</strong>: reading telemetry out and dispatching commands in. Deliberately fused — the device sits behind the tunnel, there's one of it, and S7 wants a single long-lived connection shared by heartbeat, ACK reads, and telemetry. Internally still two cleanly separated units behind ports, so each is testable without a real PLC. Runs as systemd on the WireGuard VM.",
-    meta: "Collection + dispatch · systemd @ edge"
+    body: "One on-prem process per site that handles <strong>both directions</strong>: reading telemetry out and dispatching commands in. It serves every PLC listed in the registry for its site — one reader loop and one S7 connection each. <strong>A new site means one more bridge deploy, same code</strong>; site-awareness never enters the codebase. Internally two cleanly separated units behind ports, testable without a real PLC. Runs as systemd on the WireGuard VM.",
+    meta: "One bridge per site · systemd @ edge"
   },
   DEVICE: {
-    title: "Device Surface · S7-1200",
-    body: "Outside the platform boundary. There is no API here — communication is <strong>reading and writing shared memory blocks</strong> (S7 protocol, port 102). The byte layouts of DB1/DB2/DB3 are a contract with the automation engineer's TIA Portal program. Change one side without the other and you get garbage numbers, not errors.",
-    meta: "External · on-prem · snap7"
+    title: "Device Surface · S7 PLCs",
+    body: "Outside the platform boundary. There is no API here — communication is <strong>reading and writing shared memory blocks</strong> (S7 protocol, port 102). Each PLC exposes its own DB1/DB2/DB3, and each byte layout is a contract with that PLC's automation program — <strong>declared as a layout profile in the registry</strong>, not hardcoded, since two PLCs will rarely share the exact same layout.",
+    meta: "External · on-prem · per-PLC contracts"
   }
 };
 
@@ -736,29 +736,43 @@ const NODE_DESCRIPTIONS = {
   topicC: {
     default: {
       title: "plc-commands topic",
-      body: "Commands queue here for the bridge's subscriber. The publisher is the API router, which has already written the ACCEPTED audit row before the message is sent — so every command on this topic is traceable to an operator.",
-      meta: "GCP Pub/Sub · topic"
+      body: "Commands queue here for the bridges. The publisher is the API router, which has already written the ACCEPTED audit row before the message is sent — every command is traceable to an operator. Messages carry <strong>site_id as an attribute</strong>, so each site's bridge subscribes with a filter and receives only its own commands.",
+      meta: "GCP Pub/Sub · filtered per site"
     }
   },
   reader: {
     2: {
       title: "Telemetry reader",
-      body: "One half of the bridge. A polling loop depending on a <strong>PlcStateReader port</strong> — it knows nothing about snap7 or byte offsets. Each cycle: read DB1 (and DB3) through the shared adapter, decode via a pure translator, stamp quality flags and a correlation ID, publish. Fully testable on a laptop against a fake PLC.",
-      meta: "Target · 500ms cycle"
+      body: "One polling loop <strong>per registered PLC</strong>, each depending on a PlcStateReader port — no snap7, no byte offsets in here. Each cycle: read DB1 (and DB3) through the adapter, decode via a pure translator against the PLC's layout profile, stamp quality flags and a correlation ID, publish. Fully testable on a laptop against a fake PLC.",
+      meta: "Target · 500ms cycle per PLC"
     }
   },
   dispatcher: {
     2: {
       title: "Command dispatcher",
-      body: "The other half. Subscribes to plc-commands and runs each command's lifecycle: idempotency check, validate (reject if plc_mode=LOCAL), write DB2 with a fresh sequence number, <strong>await the matching ack_seq from DB3</strong>, publish the outcome event. Also owns the 1s heartbeat write that feeds the PLC's watchdog.",
+      body: "The other half. Subscribes to its site's commands and routes each to the target PLC by <strong>plc_id</strong>. Per command: idempotency check, validate (reject if that PLC reports LOCAL mode), write its DB2 with a fresh sequence number, <strong>await the matching ack_seq from its DB3</strong>, publish the outcome event. Also owns the 1s heartbeat write feeding each PLC's watchdog.",
       meta: "Target · lifecycle + heartbeat"
     }
   },
   s7: {
     2: {
       title: "S7 adapter · snap7",
-      body: "<strong>The only code in the entire system that knows S7 exists</strong> — DB numbers, byte offsets, struct packing, reconnect backoff. One long-lived connection shared by the reader and the dispatcher. Swap the PLC vendor, change this adapter, touch nothing above.",
+      body: "<strong>The only code in the entire system that knows S7 exists</strong> — DB numbers, byte offsets, struct packing, reconnect backoff. One long-lived connection per PLC, each shared by that PLC's reader loop and the dispatcher. Swap the PLC vendor, change this adapter, touch nothing above.",
       meta: "Target · the vendor seam"
+    }
+  },
+  registry: {
+    default: {
+      title: "PLC registry",
+      body: "A small Postgres table: plc_id, site_id, network address, rack/slot, <strong>DB layout profile</strong>, active flag. The bridge loads its site's rows (TTL-cached — the registry changes rarely) and spins up one reader loop and one connection per active PLC. <strong>Adding a PLC at an existing site is a registry row, not a deployment.</strong>",
+      meta: "Target · config as data"
+    }
+  },
+  plcmore: {
+    default: {
+      title: "Additional PLCs",
+      body: "Scaling out is linear and boring, by design. <strong>Same site:</strong> one more registry row — the bridge picks it up on the next cache refresh. <strong>New site:</strong> deploy the same bridge on that site's WireGuard VM with site-scoped config. Everything above the event bus is already keyed by plc_id and site_id, so it never notices.",
+      meta: "External · linear scale-out"
     }
   },
   db1: {
@@ -799,18 +813,19 @@ const ARCHITECTURES = {
     title: "Target <em>architecture</em>",
     statusLabel: "Proposed target",
     statusClass: "target",
-    desc: "Live and historical PLC telemetry on the dashboard, commands with a full audit trail. Built from the same proven patterns as miner-control, sized for one PLC — not 6,000 devices.",
+    desc: "Live and historical PLC telemetry on the dashboard, commands with a full audit trail. Built from the same proven patterns as miner-control. Scales from one PLC to many: a registry row per device, a bridge deploy per site.",
     stats: [
       { label: "PLCs", value: "1 → N" },
       { label: "Live / history", value: "500ms · 1–5s" },
-      { label: "Dashboard", value: "Polling", cyan: true },
-      { label: "New services", value: "2" },
+      { label: "Add a PLC", value: "Registry row", cyan: true },
+      { label: "Add a site", value: "1 deploy", cyan: true },
     ],
     deltas: [
       { same: true, text: "Same layered shape as miner-control · proven in production" },
       { same: true, text: "Shared package core/ reused · correlation, subscriber, envelopes" },
       { text: "plc/ bounded context · domain types, ports, no S7 inside" },
-      { text: "Bridge hardened · two hexagons, one S7 connection, fake_plc tests" },
+      { text: "Bridge hardened · reader + dispatcher behind ports, fake-PLC tests" },
+      { text: "PLC registry · devices and byte layouts as data, not code" },
       { text: "Command audit · accepted → dispatching → acked, LOCAL-mode rejects" },
       { text: "One sink service · Firestore live + Postgres history/audit" },
       { text: "plc-control router in ems-api · 202 fire-and-poll" },
@@ -823,12 +838,14 @@ const ARCHITECTURES = {
       hist:       { x: 480, y: 260, w: 210, h: 44, label: "Postgres", sub: "plc_telemetry + command_audit" },
       topicT:     { x: 150, y: 348, w: 170, h: 34, label: "plc-telemetry topic", sub: "readings + outcomes", topic: true },
       topicC:     { x: 500, y: 348, w: 170, h: 34, label: "plc-commands topic", sub: "queue", topic: true, cyan: true },
-      reader:     { x: 80,  y: 442, w: 190, h: 44, label: "Telemetry reader", sub: "DB1 poll · 500ms · quality", highlight: true },
+      reader:     { x: 80,  y: 442, w: 190, h: 44, label: "Telemetry reader", sub: "one loop per PLC · 500ms", highlight: true },
+      registry:   { x: 305, y: 442, w: 190, h: 44, label: "PLC registry", sub: "which PLCs · where · layouts" },
       dispatcher: { x: 530, y: 442, w: 190, h: 44, label: "Command dispatcher", sub: "lifecycle · heartbeat · ack", cyan: true },
-      s7:         { x: 270, y: 502, w: 260, h: 38, label: "S7 adapter · snap7", sub: "one shared connection · only S7-aware code", highlight: true },
-      db1:        { x: 100, y: 615, w: 170, h: 50, label: "DB1 · telemetry", sub: "76 B · PLC writes" },
-      db2:        { x: 315, y: 615, w: 170, h: 50, label: "DB2 · commands", sub: "8 B · bridge writes", cyan: true },
-      db3:        { x: 530, y: 615, w: 170, h: 50, label: "DB3 · ack", sub: "12 B · PLC writes" },
+      s7:         { x: 270, y: 502, w: 260, h: 38, label: "S7 adapter · snap7", sub: "one connection per PLC · only S7-aware code", highlight: true },
+      db1:        { x: 60,  y: 615, w: 160, h: 50, label: "DB1 · telemetry", sub: "PLC·1 · 76 B · PLC writes" },
+      db2:        { x: 240, y: 615, w: 160, h: 50, label: "DB2 · commands", sub: "PLC·1 · 8 B · bridge writes", cyan: true },
+      db3:        { x: 420, y: 615, w: 160, h: 50, label: "DB3 · ack", sub: "PLC·1 · 12 B · PLC writes" },
+      plcmore:    { x: 600, y: 615, w: 140, h: 50, label: "+ N PLCs", sub: "registry row · or new site" },
     },
     connections: [
       { from: "ui", to: "api", type: "down" },
@@ -843,9 +860,11 @@ const ARCHITECTURES = {
       { from: "dispatcher", to: "topicT", type: "up", offset: -30 },
       { from: "s7", to: "reader", type: "up", dashed: true },
       { from: "s7", to: "dispatcher", type: "up", dashed: true },
+      { from: "registry", to: "s7", type: "down", dashed: true },
       { from: "db1", to: "s7", type: "up", dashed: true },
       { from: "s7", to: "db2", type: "down", dashed: true },
       { from: "db3", to: "s7", type: "up", dashed: true },
+      { from: "s7", to: "plcmore", type: "down", dashed: true },
     ],
     flowsUp: [
       "db1->s7->reader->topicT->live",
