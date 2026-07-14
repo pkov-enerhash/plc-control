@@ -686,8 +686,8 @@ const LAYER_DESCRIPTIONS = {
   },
   EDGE: {
     title: "Edge · PLC Bridge",
-    body: "One on-prem process per site that handles <strong>both directions</strong>: reading telemetry out and dispatching commands in. It serves every PLC listed in the registry for its site — one reader loop and one S7 connection each. <strong>A new site means one more bridge deploy, same code</strong>; site-awareness never enters the codebase. Internally two cleanly separated units behind ports, testable without a real PLC. Runs as systemd on the WireGuard VM.",
-    meta: "One bridge per site · systemd @ edge"
+    body: "One process per site handling <strong>both directions</strong>: reading telemetry out and dispatching commands in. It serves every PLC listed in the registry for its site — one reader loop and one S7 connection each. <strong>A new site means one more bridge deploy, same code.</strong> Today it runs on the GCP VM that terminates the site's WireGuard tunnel, so S7 traffic crosses the WAN; moving it onto site-local hardware later is a redeployment, not a redesign — it speaks S7 down and Pub/Sub up either way.",
+    meta: "One bridge per site · systemd on the tunnel VM"
   },
   DEVICE: {
     title: "Device Surface · S7 PLCs",
